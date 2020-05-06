@@ -1,320 +1,248 @@
-一、环境信息
+一、Redux简介
+
+推荐的开发模式是一个app只使用一个store，项目结构通常做如下划分：
+
+- actions
+
+> 具有type属性的对象，用于触发状态变更的动作，改变状态的唯一方法。
+
+- components
+
+> 只负责视觉呈现的展示组件，也可以分为components和pages两个目录，pages对应路由页面。
+
+- containers
+
+> 负责管理数据和业务逻辑的容器组件。
+
+- reducers
+
+> 响应状态变更动作的状态处理函数，根据action对象的type来更新状态。
+
+- store
+
+> state状态管理器，接收action以调用reducer。
+
+- api
+
+> 用于封装对后端数据的请求。
+
+二、环境信息
 ---
 
 - NodeJS：v12.16.1
 - Yarn：1.22.4
 - create-react-app：3.4.1
 
-二、创建项目
+三、项目
 ---
 
-使用React官方脚手架创建项目：
+基于[React简单TODO示例](/2020/04/10/react-simple-todo/index.html)进行调整。
+
+本示例同时演示异步数据请求，需依赖redux-promise-middleware中间件：
 
 ```
-create-react-app react-simple-todo
-cd react-simple-todo
-yarn start
+yarn add redux react-redux redux-promise-middleware
 ```
 
-浏览器出现以下画面，项目生成成功。
+### API
 
-![](http://blog.gopersist.com/images/react-simple-todo/001.png)
+实现api/todo.js用于模拟异步请求，增删改查的方法都通过setTimeout模拟请求延时：
 
-三、Todo List
-
-使用下面的命令添加路由依赖：
-
-```
-yarn add react-router-dom antd
-```
-
-src目录下增加todo文件夹，新在todo下新建文件List.jsx，内容如下：
-
-```javascript
-import React from 'react';
-import { Table } from 'antd';
-
-const columns = [{
-  title: '标题',
-  dataIndex: 'title',
+```js
+let list = [{
+  id: 1,
+  title: 'React简单示例演示任务',
+  status: 'completed',
 }, {
-  title: '状态',
-  dataIndex: 'status',
+  id: 2,
+  title: '博客更新',
+  status: 'pending',
+}, {
+  id: 3,
+  title: 'React Redux示例演示任务',
+  status: 'processing',
 }];
+let maxId = 3;
 
-class List extends React.Component {
-  constructor(props) {
-    super(props);
+export const fetch = () => {
+  return new Promise(resolve => {
+    setTimeout(() => resolve(list), 2000);
+  });
+};
 
-    this.state = {
-      list: [{
-        id: 1,
-        title: 'React简单示例演示任务',
-        status: '进行中',
-      }, {
-        id: 2,
-        title: '博客更新',
-        status: '未开始',
-      }]
-    }
-  }
+export const create = entity => {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      list = [ ...list, { ...entity, id: ++maxId }];
+      resolve();
+    }, 2000);
+  });
+};
 
-  render() {
-    return (
-      <Table dataSource={this.state.list} columns={columns} rowKey="id" />
-    );
+export const update = (id, entity) => {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      list = list.map(v  => v.id === id ? { ...entity, id } : v);
+      resolve();
+    }, 2000);
+  });
+};
+
+export const del = id => {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      list = list.filter(v => v.id !== id);
+      resolve();
+    }, 2000);
+  });
+};
+```
+
+### Action
+
+实现actions/todo.js用于处理状态变更，这里通过redux-promise-middleware中间件来定义payload为Promise的action，用于处理异步请求：
+
+```js
+import { fetch, create, update, del } from '../api/todo';
+
+export const ActionTypes = {
+  FETCH: 'FETCH_TODO',
+  CREATE: 'CREATE_TODO',
+  UPDATE: 'UPDATE_TODO',
+  DELETE: 'DELETE_TODO',
+};
+
+export const fetchTodo = () => ({
+  type: ActionTypes.FETCH,
+  payload: fetch(),
+});
+
+export const createTodo = entity => ({
+  type: ActionTypes.CREATE,
+  payload: create(entity),
+});
+
+export const updateTodo = (id, entity) => ({
+  type: ActionTypes.UPDATE,
+  payload: update(id, entity),
+});
+
+export const deleteTodo = id => ({
+  type: ActionTypes.DELETE,
+  payload: del(id),
+});
+```
+
+### Reducer
+
+使用redux-promise-middleware中间件处理Promise的action时，当对应action发出，中间件会立即触发一个{ACTION_TYPE}\_PENDING的action，当Promise的状态改变（resolved或rejected）时再触发另一个action（{ACTION_TYPE}\_FULFILLED或{ACTION_TYPE}\_REJECTED）：
+
+```js
+import { ActionTypes } from '../actions/todo';
+
+const todo = (state = {
+  loading: false,
+  saving: false,
+}, action) => {
+  switch (action.type) {
+    case `${ActionTypes.FETCH}_PENDING`:
+      return {
+        ...state,
+        loading: true,
+      };
+    case `${ActionTypes.FETCH}_FULFILLED`:
+      return {
+        ...state,
+        loading: false,
+        list: action.payload,
+      };
+    default:
+      return state;
   }
 };
 
-export default List;
+export default todo;
 ```
 
-调整index.js，增加路由，最终内容如下：
+### Container
 
-```javascript
+对component尽量使用函数式组件，业务和数据尽量在container中处理：
+
+```js
+import { connect } from 'react-redux';
+import { fetchTodo, createTodo, updateTodo, deleteTodo } from '../actions/todo';
+import Todo from '../components/todo';
+
+const mapStateToProps = state => {
+  return state.todo;
+};
+
+const mapDispatchToProps = (dispatch) => {
+  const fetch = () => dispatch(fetchTodo());
+  const create = entity => {
+    const create = dispatch(createTodo(entity));
+    create.then(fetch);
+    return create;
+  };
+  const update = (id, entity) => {
+    const update = dispatch(updateTodo(id, entity));
+    update.then(fetch);
+    return update;
+  };
+  const del = id => {
+    const del = dispatch(deleteTodo(id));
+    del.then(fetch);
+    return del;
+  };
+
+  return {
+    fetch,
+    create,
+    update,
+    del,
+  }
+};
+
+export default connect(
+  mapStateToProps,
+  mapDispatchToProps
+)(Todo);
+```
+
+在创建、更新、删除数据成功后，重新刷新数据列表。
+
+### Store
+
+在程序入口创建store，并通过Provider组件进行传递：
+
+```js
 import React from 'react';
 import ReactDOM from 'react-dom';
+import { Provider } from 'react-redux'
+import { createStore, applyMiddleware } from 'redux';
+import promise from 'redux-promise-middleware';
 import { BrowserRouter as Router, Route } from 'react-router-dom';
 import './index.css';
 import App from './App';
-import Todo from './todo/List';
+import Todo from './containers/Todo';
+import reducers from './reducers';
+
+const composeStoreWithMiddleware = applyMiddleware(promise)(createStore);
+const store = composeStoreWithMiddleware(reducers);
 
 ReactDOM.render(
-  <Router>
-    <Route path="/" component={App} exact />
-    <Route path="/todo" component={Todo} />
-  </Router>,
+  <Provider store={store}>
+    <Router>
+      <Route path="/" component={App} exact />
+      <Route path="/todo" component={Todo} />
+    </Router>
+  </Provider>,
   document.getElementById('root')
 );
 ```
 
-此时在浏览器中输入()[http://localhost:3000/todo]，可以访问todoList，但antd的没有样式，如下图：
-
-![](http://blog.gopersist.com/images/react-simple-todo/002.png)
-
-执行下面的命令，将配置暴露出来：
-
-```
-yarn run eject
-```
-
-安装插件：
-
-```
-yarn add babel-plugin-import --save-dev
-```
-
-在package.json的babel节点下增加plugins配置，使其像下面这样：
-
-```
-  "babel": {
-    "presets": [
-      "react-app"
-    ],
-    "plugins": [
-      ["import", { "libraryName": "antd", "libraryDirectory": "es", "style": "css" }]
-    ]
-  }
-```
-
-服务停掉重启一次，然后界面刷新后antd样式可以正常，如下：
-
-![](http://blog.gopersist.com/images/react-simple-todo/003.png)
-
-三、Todo Edit
-
-接下来增加创建、修改、删除TODO的功能，首先增加Edit.jsx，用于实现编辑功能。
-
-```javascript
-import React from 'react';
-import { Modal, Form, Input, Select } from 'antd';
-import STATUS from './status';
-
-const Edit = ({ children, onOk, record }) => {
-  const [form] = Form.useForm();
-  const [visible, setVisible] = React.useState(false);
-
-  React.useEffect(() => {
-    if (visible) {
-      form.resetFields();
-      form.setFieldsValue(record);
-    }
-  }, [visible, form, record]);
-
-  const layout = {
-    labelCol: { span: 6 },
-    wrapperCol: { span: 14 },
-  };
-
-  function showHandler(e) {
-    if (e) e.stopPropagation();
-    setVisible(true);
-  }
-
-  function hideHandler() {
-    setVisible(false);
-  }
-
-  async function okHandler () {
-    try {
-      const values = await form.validateFields();
-      console.log('Success: ', values);
-      hideHandler();
-      onOk(values);
-    } catch (errorInfo) {
-      console.log('Failed: ', errorInfo);
-    }
-  }
-
-  return (
-    <span>
-        <span onClick={showHandler}>
-          { children }
-        </span>
-
-        <Modal
-          title="编辑"
-          visible={visible}
-          onOk={okHandler}
-          onCancel={hideHandler}
-          getContainer={false}
-        >
-          <Form
-            {...layout}
-            form={form}
-            initialValues={{
-              status: record.status || STATUS[0].key,
-            }}
-          >
-            <Form.Item
-              label="标题"
-              name="title"
-              rules={[
-                {
-                  required: true,
-                },
-              ]}
-            >
-              <Input />
-            </Form.Item>
-
-            <Form.Item
-              label="状态"
-              name="status"
-              rules={[
-                {
-                  required: true,
-                },
-              ]}
-            >
-              <Select>
-                {
-                  STATUS.map(v => (
-                    <Select.Option key={v.key} value={v.key}>{v.title}</Select.Option>
-                  ))
-                }
-              </Select>
-            </Form.Item>
-          </Form>
-        </Modal>
-      </span>
-  );
-};
-
-export default Edit;
-```
-
-然后调整List.jsx，增加增删改入口：
-
-```javascript
-import React from 'react';
-import { Table, Button, Popconfirm } from 'antd';
-import STATUS from './status';
-import Edit from './Edit';
-
-class List extends React.Component {
-  constructor(props) {
-    super(props);
-
-    this.state = {
-      list: [{
-        id: 1,
-        title: 'React简单示例演示任务',
-        status: 'processing',
-      }, {
-        id: 2,
-        title: '博客更新',
-        status: 'pending',
-      }]
-    };
-
-    this.maxId = 2;
-  }
-
-  columns = [{
-    title: '标题',
-    dataIndex: 'title',
-  }, {
-    title: '状态',
-    dataIndex: 'status',
-    render: key => STATUS.find(v => v.key === key).title,
-  }, {
-    title: '操作',
-    render: (text, record) => (
-      <div style={{ display: 'flex' }}>
-        <Edit record={record} onOk={this.editHandler.bind(this, record.id)}>
-          <Button type="link">编辑</Button>
-        </Edit>
-        <Popconfirm title="确认删除？" onConfirm={this.deleteHandler.bind(this, record.id)}>
-          <Button type="link" danger>删除</Button>
-        </Popconfirm>
-      </div>
-    ),
-  }];
-
-  createHandler = (values) => {
-    this.setState({
-      list: [...this.state.list, {...values, id: ++this.maxId}],
-    });
-  };
-
-  editHandler = (id, values) => {
-    console.log(id, values);
-    this.setState({
-      list: this.state.list.map(v => v.id === id ? {...values, id} : v),
-    });
-  };
-
-  deleteHandler = id => {
-    this.setState({
-      list: this.state.list.filter(v => v.id !== id),
-    })
-  };
-
-  render() {
-    return (
-      <div>
-        <div>
-          <Edit record={{}} onOk={this.createHandler}>
-            <Button type="primary">创建</Button>
-          </Edit>
-        </div>
-
-        <Table dataSource={this.state.list} columns={this.columns} rowKey="id" />
-      </div>
-    );
-  }
-};
-
-export default List;
-```
-
 最终效果：
 
-![](http://blog.gopersist.com/images/react-simple-todo/004.png)
+![](http://blog.gopersist.com/images/react-redux-todo/01.gif)
 
-![](http://blog.gopersist.com/images/react-simple-todo/005.png)
-
-![](http://blog.gopersist.com/images/react-simple-todo/006.png)
-
-示例代码下载地址：[https://github.com/gpleo/react-simple-todo](https://github.com/gpleo/react-simple-todo)
+示例代码下载地址：[https://github.com/gpleo/react-redux-todo](https://github.com/gpleo/react-redux-todo)
