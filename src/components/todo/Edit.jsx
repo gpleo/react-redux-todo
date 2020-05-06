@@ -1,17 +1,22 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import { Modal, Form, Input, Select } from 'antd';
 import STATUS from './status';
 
 const Edit = ({ children, onOk, record }) => {
   const [form] = Form.useForm();
   const [visible, setVisible] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
     if (visible) {
       form.resetFields();
       form.setFieldsValue(record);
     }
-  }, [visible, form, record]);
+  },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible]
+  );
 
   const layout = {
     labelCol: { span: 6 },
@@ -24,15 +29,18 @@ const Edit = ({ children, onOk, record }) => {
   }
 
   function hideHandler() {
+    setSaving(false);
     setVisible(false);
   }
 
   async function okHandler () {
+    setSaving(true);
     try {
       const values = await form.validateFields();
-      console.log('Success: ', values);
-      hideHandler();
-      onOk(values);
+      onOk(values)
+        .then(() => {
+          hideHandler();
+        });
     } catch (errorInfo) {
       console.log('Failed: ', errorInfo);
     }
@@ -47,6 +55,7 @@ const Edit = ({ children, onOk, record }) => {
         <Modal
           title="编辑"
           visible={visible}
+          confirmLoading={saving}
           onOk={okHandler}
           onCancel={hideHandler}
           getContainer={false}
@@ -91,6 +100,18 @@ const Edit = ({ children, onOk, record }) => {
         </Modal>
       </span>
   );
+};
+
+Edit.propTypes = {
+  onOk: PropTypes.func.isRequired,
+  record: PropTypes.shape({
+    title: PropTypes.string,
+    status: PropTypes.string,
+  }),
+};
+
+Edit.defaultProps = {
+  record: {},
 };
 
 export default Edit;
